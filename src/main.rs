@@ -28,9 +28,21 @@ impl fmt::Display for NvmeNoArgumentError {
 }
 
 #[derive(Debug)]
+struct NvmeInvalidOptionError;
+
+impl Error for NvmeInvalidOptionError {}
+
+impl fmt::Display for NvmeInvalidOptionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Invalid Option")
+    }
+}
+
+#[derive(Debug)]
 enum NvmeError {
     Parse(NvmeParseError),
     NoArgument(NvmeNoArgumentError),
+    InvalidOption(NvmeInvalidOptionError),
     InvalidAddr(AddrParseError),
     ParseInt(ParseIntError),
 }
@@ -42,7 +54,20 @@ impl fmt::Display for NvmeError {
 	    NvmeError::NoArgument(ref err) => write!(f, "No argument specified: {}", err),
 	    NvmeError::InvalidAddr(ref err) => write!(f, "Invalid IPv4 address: {}", err),
 	    NvmeError::ParseInt(ref err) => write!(f, "Integer parse error: {}", err),
+	    NvmeError::InvalidOption(ref err) => write!(f, "Invalid option: {}", err),
 	}
+    }
+}
+
+impl From<ParseIntError> for NvmeError {
+    fn from(err: ParseIntError) -> Self {
+        NvmeError::ParseInt(err)
+    }
+}
+
+impl From<AddrParseError> for NvmeError {
+    fn from(err: AddrParseError) -> Self {
+	NvmeError::InvalidAddr(err)
     }
 }
 
@@ -117,7 +142,7 @@ impl IPV4DiscRecord {
 		"--traddr" => {
 		    match args_iter.next() {
 			Some(a) => { 
-			    self.traddr = a.parse().map_err(|e| NvmeError::InvalidAddr(e))?;
+			    self.traddr = a.parse()?;
 			},
 			None => {
 			    return Err(NvmeError::NoArgument(NvmeNoArgumentError));
@@ -127,7 +152,7 @@ impl IPV4DiscRecord {
 		"--trsvcid" => {
 		    match args_iter.next() {
 			Some(a) => {
-			    self.trsvcid = a.parse().map_err(|e| NvmeError::ParseInt(e))?;
+			    self.trsvcid = a.parse()?;
 			},
 			None => {
 			    return Err(NvmeError::NoArgument(NvmeNoArgumentError));
@@ -151,7 +176,7 @@ impl IPV4DiscRecord {
 		    }
 		},
 		_ => {
-		    panic!("Invalid argument {}", arg);
+		    return Err(NvmeError::InvalidOption(NvmeInvalidOptionError));
 		},
 	    }
 	}
