@@ -86,48 +86,24 @@ impl IPV4DiscRecord {
 	while let Some(arg) = args_iter.next() {
 	    match arg.as_str() {
 		"--nqn" => {
-		    match args_iter.next() {
-			Some(a) => { self.nqn = a.to_string(); },
-			None => {
-			    return Err(NvmeError::NoArgument);
-			},
-		    }
+		    self.nqn = args_iter.next()
+			.ok_or(NvmeError::NoArgument)?.to_string();
 		},
 		"--traddr" => {
-		    match args_iter.next() {
-			Some(a) => { 
-			    self.traddr = a.parse()?;
-			},
-			None => {
-			    return Err(NvmeError::NoArgument);
-			},
-		    }
+		    self.traddr = args_iter.next()
+			.ok_or(NvmeError::NoArgument)?.parse()?;
 		},
 		"--trsvcid" => {
-		    match args_iter.next() {
-			Some(a) => {
-			    self.trsvcid = a.parse()?;
-			},
-			None => {
-			    return Err(NvmeError::NoArgument);
-			},
-		    }
+		    self.trsvcid = args_iter.next()
+			.ok_or(NvmeError::NoArgument)?.parse()?;
 		},
 		"--trtype" => {
-		    match args_iter.next() {
-			Some(a) => { self.trtype = a.parse()?; },
-			None => {
-			    return Err(NvmeError::NoArgument);
-			},
-		    }
+		    self.trtype = args_iter.next()
+			.ok_or(NvmeError::NoArgument)?.parse()?;
 		},
 		"--adrfam" => {
-		    match args_iter.next() {
-			Some(a) => { self.adrfam = a.parse()?; },
-			None => {
-			    return Err(NvmeError::NoArgument);
-			},
-		    }
+		    self.adrfam = args_iter.next()
+			.ok_or(NvmeError::NoArgument)?.parse()?;
 		},
 		_ => {
 		    return Err(NvmeError::InvalidOption(arg.to_string()));
