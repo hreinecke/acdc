@@ -1,4 +1,5 @@
 use std::env;
+use std::fmt;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 use std::net::AddrParseError;
@@ -22,6 +23,18 @@ impl From<ParseIntError> for NvmeError {
 impl From<AddrParseError> for NvmeError {
     fn from(err: AddrParseError) -> Self {
 	NvmeError::InvalidAddr(err)
+    }
+}
+
+impl fmt::Display for NvmeError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+       match *self {
+           NvmeError::Parse(ref err) => write!(f, "Parse error: {}", err),
+           NvmeError::NoArgument => write!(f, "No argument specified"),
+           NvmeError::InvalidAddr(ref err) => write!(f, "Invalid IPv4 address: {}", err),
+           NvmeError::ParseInt(ref err) => write!(f, "Integer parse error: {}", err),
+           NvmeError::InvalidOption(ref err) => write!(f, "Invalid option: {}", err),
+       }
     }
 }
 
@@ -125,6 +138,9 @@ fn main() {
         trsvcid: 8009,
     };
 
-    drec.parse(args).expect("Argument error");
+    match drec.parse(args) {
+	Ok(a) => a,
+	Err(e) => { return eprintln!("Error {}", e.to_string()); }
+    }
     println!("{} {} {}", drec.nqn, drec.traddr, drec.trsvcid);
 }
