@@ -1,62 +1,16 @@
 use std::env;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
-use std::{error::Error, fmt};
 use std::net::AddrParseError;
 use std::num::ParseIntError;
 
 #[derive(Debug)]
-struct NvmeParseError;
-
-impl Error for NvmeParseError {}
-
-impl fmt::Display for NvmeParseError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Failed to parse")
-    }
-}
-
-#[derive(Debug)]
-struct NvmeNoArgumentError;
-
-impl Error for NvmeNoArgumentError {}
-
-impl fmt::Display for NvmeNoArgumentError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Missing argument")
-    }
-}
-
-#[derive(Debug)]
-struct NvmeInvalidOptionError;
-
-impl Error for NvmeInvalidOptionError {}
-
-impl fmt::Display for NvmeInvalidOptionError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Invalid Option")
-    }
-}
-
-#[derive(Debug)]
 enum NvmeError {
-    Parse(NvmeParseError),
-    NoArgument(NvmeNoArgumentError),
-    InvalidOption(NvmeInvalidOptionError),
+    Parse(String),
+    NoArgument,
+    InvalidOption(String),
     InvalidAddr(AddrParseError),
     ParseInt(ParseIntError),
-}
-
-impl fmt::Display for NvmeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-	match *self {
-	    NvmeError::Parse(ref err) => write!(f, "Parse error: {}", err),
-	    NvmeError::NoArgument(ref err) => write!(f, "No argument specified: {}", err),
-	    NvmeError::InvalidAddr(ref err) => write!(f, "Invalid IPv4 address: {}", err),
-	    NvmeError::ParseInt(ref err) => write!(f, "Integer parse error: {}", err),
-	    NvmeError::InvalidOption(ref err) => write!(f, "Invalid option: {}", err),
-	}
-    }
 }
 
 impl From<ParseIntError> for NvmeError {
@@ -87,7 +41,7 @@ impl FromStr for NvmeTrType {
 	    "FC" => { val = Ok(NvmeTrType::FC); },
 	    "TCP" => { val = Ok(NvmeTrType::TCP); },
 	    "Loop" => { val = Ok(NvmeTrType::LOOP); },
-	    _ => { val = Err(NvmeError::Parse(NvmeParseError)); },
+	    _ => { val = Err(NvmeError::Parse(s.to_string())); },
 	}
 	val
     }
@@ -111,7 +65,7 @@ impl FromStr for NvmeAdrFam {
 	    "IB" => { val = Ok(NvmeAdrFam::IB); },
 	    "FC" => { val = Ok(NvmeAdrFam::FC); },
 	    "Loop" => { val = Ok(NvmeAdrFam::LOOP); },
-	    _ => { val = Err(NvmeError::Parse(NvmeParseError)); },
+	    _ => { val = Err(NvmeError::Parse(s.to_string())); },
 	}
 	val
     }
@@ -135,7 +89,7 @@ impl IPV4DiscRecord {
 		    match args_iter.next() {
 			Some(a) => { self.nqn = a.to_string(); },
 			None => {
-			    return Err(NvmeError::NoArgument(NvmeNoArgumentError));
+			    return Err(NvmeError::NoArgument);
 			},
 		    }
 		},
@@ -145,7 +99,7 @@ impl IPV4DiscRecord {
 			    self.traddr = a.parse()?;
 			},
 			None => {
-			    return Err(NvmeError::NoArgument(NvmeNoArgumentError));
+			    return Err(NvmeError::NoArgument);
 			},
 		    }
 		},
@@ -155,7 +109,7 @@ impl IPV4DiscRecord {
 			    self.trsvcid = a.parse()?;
 			},
 			None => {
-			    return Err(NvmeError::NoArgument(NvmeNoArgumentError));
+			    return Err(NvmeError::NoArgument);
 			},
 		    }
 		},
@@ -163,7 +117,7 @@ impl IPV4DiscRecord {
 		    match args_iter.next() {
 			Some(a) => { self.trtype = a.parse()?; },
 			None => {
-			    return Err(NvmeError::NoArgument(NvmeNoArgumentError));
+			    return Err(NvmeError::NoArgument);
 			},
 		    }
 		},
@@ -171,12 +125,12 @@ impl IPV4DiscRecord {
 		    match args_iter.next() {
 			Some(a) => { self.adrfam = a.parse()?; },
 			None => {
-			    return Err(NvmeError::NoArgument(NvmeNoArgumentError));
+			    return Err(NvmeError::NoArgument);
 			},
 		    }
 		},
 		_ => {
-		    return Err(NvmeError::InvalidOption(NvmeInvalidOptionError));
+		    return Err(NvmeError::InvalidOption(arg.to_string()));
 		},
 	    }
 	}
