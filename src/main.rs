@@ -8,7 +8,7 @@ use std::num::ParseIntError;
 #[derive(Debug)]
 enum NvmeError {
     Parse(String),
-    NoArgument,
+    NoArgument(String),
     InvalidOption(String),
     InvalidAddr(AddrParseError),
     ParseInt(ParseIntError),
@@ -30,10 +30,10 @@ impl fmt::Display for NvmeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
        match *self {
            NvmeError::Parse(ref err) => write!(f, "Parse error: {}", err),
-           NvmeError::NoArgument => write!(f, "No argument specified"),
-           NvmeError::InvalidAddr(ref err) => write!(f, "Invalid IPv4 address: {}", err),
-           NvmeError::ParseInt(ref err) => write!(f, "Integer parse error: {}", err),
-           NvmeError::InvalidOption(ref err) => write!(f, "Invalid option: {}", err),
+           NvmeError::NoArgument(ref err) => write!(f, "No argument for option '{}'", err),
+           NvmeError::InvalidAddr(ref err) => write!(f, "Invalid IPv4 address '{}'", err),
+           NvmeError::ParseInt(ref err) => write!(f, "Cannot parse integer, {}", err),
+           NvmeError::InvalidOption(ref err) => write!(f, "Invalid option '{}'", err),
        }
     }
 }
@@ -100,23 +100,23 @@ impl IPV4DiscRecord {
 	    match arg.as_str() {
 		"--nqn" => {
 		    self.nqn = args_iter.next()
-			.ok_or(NvmeError::NoArgument)?.to_string();
+			.ok_or(NvmeError::NoArgument(arg.to_string()))?.to_string();
 		},
 		"--traddr" => {
 		    self.traddr = args_iter.next()
-			.ok_or(NvmeError::NoArgument)?.parse()?;
+			.ok_or(NvmeError::NoArgument(arg.to_string()))?.parse()?;
 		},
 		"--trsvcid" => {
 		    self.trsvcid = args_iter.next()
-			.ok_or(NvmeError::NoArgument)?.parse()?;
+			.ok_or(NvmeError::NoArgument(arg.to_string()))?.parse()?;
 		},
 		"--trtype" => {
 		    self.trtype = args_iter.next()
-			.ok_or(NvmeError::NoArgument)?.parse()?;
+			.ok_or(NvmeError::NoArgument(arg.to_string()))?.parse()?;
 		},
 		"--adrfam" => {
 		    self.adrfam = args_iter.next()
-			.ok_or(NvmeError::NoArgument)?.parse()?;
+			.ok_or(NvmeError::NoArgument(arg.to_string()))?.parse()?;
 		},
 		_ => {
 		    return Err(NvmeError::InvalidOption(arg.to_string()));
@@ -140,7 +140,7 @@ fn main() {
 
     match drec.parse(args) {
 	Ok(a) => a,
-	Err(e) => { return eprintln!("Error {}", e.to_string()); }
+	Err(e) => { return eprintln!("Error: {}", e.to_string()); }
     }
     println!("{} {} {}", drec.nqn, drec.traddr, drec.trsvcid);
 }
