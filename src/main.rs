@@ -48,15 +48,13 @@ enum NvmeTrType {
 impl FromStr for NvmeTrType {
     type Err = NvmeError;
     fn from_str(s: &str) -> Result<Self,Self::Err> {
-	let val: Result<NvmeTrType,Self::Err>;
 	match s {
-	    "RDMA" => { val = Ok(NvmeTrType::RDMA); },
-	    "FC" => { val = Ok(NvmeTrType::FC); },
-	    "TCP" => { val = Ok(NvmeTrType::TCP); },
-	    "Loop" => { val = Ok(NvmeTrType::LOOP); },
-	    _ => { val = Err(NvmeError::Parse(s.to_string())); },
+	    "RDMA" => { Ok(NvmeTrType::RDMA) },
+	    "FC" => { Ok(NvmeTrType::FC) },
+	    "TCP" => { Ok(NvmeTrType::TCP) },
+	    "Loop" => { Ok(NvmeTrType::LOOP) },
+	    _ => { Err(NvmeError::Parse(s.to_string())) },
 	}
-	val
     }
 }
 
@@ -71,16 +69,14 @@ enum NvmeAdrFam {
 impl FromStr for NvmeAdrFam {
     type Err = NvmeError;
     fn from_str(s: &str) -> Result<Self,Self::Err> {
-	let val: Result<NvmeAdrFam,Self::Err>;
 	match s {
-	    "IPv4" => { val = Ok(NvmeAdrFam::IP4); },
-	    "IPv6" => { val = Ok(NvmeAdrFam::IP6); },
-	    "IB" => { val = Ok(NvmeAdrFam::IB); },
-	    "FC" => { val = Ok(NvmeAdrFam::FC); },
-	    "Loop" => { val = Ok(NvmeAdrFam::LOOP); },
-	    _ => { val = Err(NvmeError::Parse(s.to_string())); },
+	    "IPv4" => { Ok(NvmeAdrFam::IP4) },
+	    "IPv6" => { Ok(NvmeAdrFam::IP6) },
+	    "IB" => { Ok(NvmeAdrFam::IB) },
+	    "FC" => { Ok(NvmeAdrFam::FC) },
+	    "Loop" => { Ok(NvmeAdrFam::LOOP) },
+	    _ => { Err(NvmeError::Parse(s.to_string())) },
 	}
-	val
     }
 }
 
