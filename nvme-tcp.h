@@ -43,6 +43,8 @@ enum nvme_tcp_pdu_type {
 	nvme_tcp_h2c_data	= 0x6,
 	nvme_tcp_c2h_data	= 0x7,
 	nvme_tcp_r2t		= 0x9,
+	nvme_tcp_kdreq		= 0xa,
+	nvme_tcp_kdresp		= 0xb,
 };
 
 enum nvme_tcp_pdu_flags {
@@ -50,6 +52,7 @@ enum nvme_tcp_pdu_flags {
 	NVME_TCP_F_DDGST		= (1 << 1),
 	NVME_TCP_F_DATA_LAST		= (1 << 2),
 	NVME_TCP_F_DATA_SUCCESS		= (1 << 3),
+	NVME_TCP_F_KDCONN		= (1 << 7),
 };
 
 /**
@@ -178,6 +181,57 @@ struct nvme_tcp_data_pdu {
 	__u8			rsvd[4];
 };
 
+/**
+ * struct nvme_tcp_kdreq_pdu - nvme tcp kickstart discovery request pdu
+ *
+ * @hdr:           pdu generic header
+ * @numkr:         number of kickstart records
+ * @numdie:        number of discovery information entries
+ */
+struct nvme_tcp_kdreq_pdu {
+	struct nvme_tcp_hdr	hdr;
+	__le16			numkr;
+	__le16			numdie;
+};
+
+/**
+ * struct nvme_tcp_kickstart_rec - nvme tcp kickstart record
+ *
+ * @trtrype:       transport type
+ * @adrfam:        address family
+ * @trsvcid:       transport service identifier
+ * @traddr:        transport address
+ */
+struct nvme_tcp_kickstart_rec {
+	__u8		trtype;
+	__u8		adrfam;
+	__u8		trsvcid[NVMF_TRSVCID_SIZE];
+	__u8		traddr[NVMF_TRADDR_SIZE];
+};
+
+/**
+ * struct nvme_tcp_kdresp_pdu - nvme tcp kickstart discovery response pdu
+ *
+ * @hdr:           pdu common header
+ * @ksstat:        kickstart status
+ * @failrsn:       failure reason
+ */
+struct nvme_tcp_kdresp_pdu {
+	struct nvme_tcp_hdr	hdr;
+	__u8			ksstat;
+	__u8			failrsn;
+};
+
+enum nvme_tcp_kdresp_failure_reason {
+	NVME_TCP_KDRESP_RESERVED	= (1 << 0),
+	NVME_TCP_KDRESP_NO_INFORMATION	= (1 << 1),
+	NVME_TCP_KDRESP_INVALID_TRTYPE	= (1 << 2),
+	NVME_TCP_KDRESP_INVALID_ADRFAM	= (1 << 3),
+	NVME_TCP_KDRESP_ADRFAM_MISMATCH	= (1 << 4),
+	NVME_TCP_KDRESP_TRSCVID_MISMATCH = (1 << 5),
+	NVME_TCP_KDRESP_NO_RESOURCES	= (1 << 6),
+};
+
 union nvme_tcp_pdu {
 	struct nvme_tcp_icreq_pdu	icreq;
 	struct nvme_tcp_icresp_pdu	icresp;
@@ -185,6 +239,8 @@ union nvme_tcp_pdu {
 	struct nvme_tcp_rsp_pdu		rsp;
 	struct nvme_tcp_r2t_pdu		r2t;
 	struct nvme_tcp_data_pdu	data;
+	struct nvme_tcp_kdreq_pdu	kdreq;
+	struct nvme_tcp_kdresp_pdu	kdresp;
 };
 
 #endif /* _LINUX_NVME_TCP_H */
