@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -49,13 +50,14 @@ int icreq(int sfd)
 	return len;
 }
 
-int kdreq(int sfd, int adrfam, const char *addr, const char *port)
+int kdreq(int sfd, const char **reg, int numreg)
 {
-	char buf[1024];
+	char buf[1024], *ptr;
 	struct nvme_tcp_kdreq_pdu *kdreq;
 	struct nvme_tcp_kickstart_rec *krec;
 	struct nvme_tcp_kdresp_pdu *kdresp;
-	unsigned int krec_offset, kdreq_len = 12 + 290;
+	unsigned int krec_offset, kdreq_len = 12;
+	int i;
 	ssize_t len;
 
 	krec_offset = sizeof(*kdreq);
@@ -64,15 +66,29 @@ int kdreq(int sfd, int adrfam, const char *addr, const char *port)
 	kdreq->hdr.type = nvme_tcp_kdreq;
 	kdreq->hdr.hlen = 12;
 	kdreq->hdr.pdo = krec_offset;
+	kdreq_len += sizeof(*krec) * numreg;
 	kdreq->hdr.plen = htole16(kdreq_len);
-	kdreq->numkr = htole16(1);
+	kdreq->numkr = htole16(numreg);
 	kdreq->numdie = htole16(1);
-	krec = (struct nvme_tcp_kickstart_rec *)(buf + krec_offset);
-	krec->trtype = NVMF_TRTYPE_TCP;
-	krec->adrfam = adrfam;
-	memcpy(krec->trsvcid, port, NVMF_TRSVCID_SIZE);
-	memcpy(krec->traddr, addr, NVMF_TRADDR_SIZE);
+	for (i = 0; i < numreg; i++) {
+		const char *reg_addr = reg[i];
+		const char *reg_port = "8009";
+		size_t reg_addr_size = strlen(reg_addr);
 
+		ptr = strrchr(reg_addr, ':');
+		if (ptr) {
+			reg_addr_size = ptr - reg_addr;
+			reg_port = ptr + 1;
+		}
+		krec = (struct nvme_tcp_kickstart_rec *)(buf + krec_offset);
+		memset(krec, 0, sizeof(*krec));
+		krec->trtype = NVMF_TRTYPE_TCP;
+		krec->adrfam = reg_addr[0] == '[' ?
+			NVMF_ADDR_FAMILY_IP6 : NVMF_ADDR_FAMILY_IP4;
+		memcpy(krec->trsvcid, reg_port, strlen(reg_port));
+		memcpy(krec->traddr, reg_addr, reg_addr_size);
+		krec_offset += sizeof(*krec);
+	}
 	len = write(sfd, kdreq, kdreq_len);
 	if (len < kdreq_len) {
 		perror("send kdreq");
@@ -107,19 +123,34 @@ int kdreq(int sfd, int adrfam, const char *addr, const char *port)
 
 int main(int argc, char **argv)
 {
-	const char *addr;
-	const char *port;
+	char *cdc_addr, *cdc_port = "8009", *ptr;
+	const char **reg = NULL;
 	struct addrinfo hints, *result, *rp;
 	int opt, err, sfd = -1;
-	int adrfam;
+	int numreg;
 
-	while ((opt = getopt(argc, argv, "a:p:h")) != -1) {
+	while ((opt = getopt(argc, argv, "c:r:h")) != -1) {
 		switch (opt) {
-		case 'a':
-			addr = optarg;
+		case 'c':
+			cdc_addr = strdup(optarg);
+			ptr = strrchr(cdc_addr, ':');
+			if (ptr) {
+				*ptr = '\0';
+				cdc_port = ptr + 1;
+			}
 			break;
-		case 'p':
-			port = optarg;
+		case 'r':
+			reg = realloc(reg, sizeof(const char *) * (numreg + 1));
+			if (!reg) {
+				perror("realloc");
+				return 1;
+			}
+			reg[numreg] = strdup(optarg);
+			if (!reg[numreg]) {
+				perror("strdup");
+				return 1;
+			}
+			numreg++;
 			break;
 		default:
 			return 1;
@@ -129,7 +160,7 @@ int main(int argc, char **argv)
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE;
-	err = getaddrinfo(addr, port, &hints, &result);
+	err = getaddrinfo(cdc_addr, cdc_port, &hints, &result);
 	if (err) {
 		printf("getaddrinfo: %s\n", gai_strerror(err));
 		return 1;
@@ -142,13 +173,8 @@ int main(int argc, char **argv)
 			       rp->ai_family, rp->ai_socktype, rp->ai_protocol);
 			continue;
 		}
-		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1) {
-			if (rp->ai_family == AF_INET)
-				adrfam = NVMF_ADDR_FAMILY_IP4;
-			else
-				adrfam = NVMF_ADDR_FAMILY_IP6;
+		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
 			break;
-		}
 		close(sfd);
 		sfd = -1;
 	}
@@ -159,7 +185,7 @@ int main(int argc, char **argv)
 	printf("connected\n");
 	err = icreq(sfd);
 	if (err > 0)
-		err = kdreq(sfd, adrfam, addr, port);
+		err = kdreq(sfd, reg, numreg);
 	close(sfd);
 
 	return 0;
