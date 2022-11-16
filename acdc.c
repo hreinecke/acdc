@@ -21,6 +21,7 @@ int icreq(int sfd)
 	icreq.hdr.type = nvme_tcp_icreq;
 	icreq.hdr.hlen = sizeof(icreq);
 	icreq.hdr.plen = htole32(sizeof(icreq));
+	icreq.hdr.flags = NVME_TCP_F_KDCONN;
 	icreq.pfv = htole16(NVME_TCP_PFV_1_0);
 	len = write(sfd, &icreq, sizeof(icreq));
 	if (len < sizeof(icreq)) {
@@ -80,6 +81,7 @@ int kdreq(int sfd, const char **reg, int numreg)
 			reg_addr_size = ptr - reg_addr;
 			reg_port = ptr + 1;
 		}
+		printf("Registering %s port %s\n", reg_addr, reg_port);
 		krec = (struct nvme_tcp_kickstart_rec *)(buf + krec_offset);
 		memset(krec, 0, sizeof(*krec));
 		krec->trtype = NVMF_TRTYPE_TCP;
