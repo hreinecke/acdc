@@ -56,15 +56,16 @@ int kdreq(int sfd, const char **reg, int numreg)
 	struct nvme_tcp_kdreq_pdu *kdreq;
 	struct nvme_tcp_kickstart_rec *krec;
 	struct nvme_tcp_kdresp_pdu *kdresp;
-	unsigned int krec_offset, kdreq_len = 12;
+	unsigned int krec_offset, kdreq_len = sizeof(*kdreq);
 	int i;
 	ssize_t len;
 
-	krec_offset = sizeof(*kdreq);
+	krec_offset = kdreq_len;
 	memset(buf, 0, sizeof(buf));
 	kdreq = (struct nvme_tcp_kdreq_pdu *)buf;
 	kdreq->hdr.type = nvme_tcp_kdreq;
-	kdreq->hdr.hlen = 12;
+	kdreq->hdr.hlen = krec_offset;
+	kdreq->hdr.flags = (1 << 6);
 	kdreq->hdr.pdo = krec_offset;
 	kdreq_len += sizeof(*krec) * numreg;
 	kdreq->hdr.plen = htole16(kdreq_len);
