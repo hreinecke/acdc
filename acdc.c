@@ -34,18 +34,18 @@ int icreq(int sfd)
 
 		icresp = (struct nvme_tcp_icresp_pdu *)buf;
 		if (icresp->hdr.type != nvme_tcp_icresp) {
-			printf("Not an icresp PDU\n");
+			fprintf(stderr, "Not an icresp PDU\n");
 			return -1;
 		}
 		if (le32toh(icresp->hdr.plen) != sizeof(*icresp)) {
-			printf("Invalid icresp PDU len\n");
+			fprintf(stderr, "Invalid icresp PDU len\n");
 			return -1;
 		}
 		if (icresp->pfv != NVME_TCP_PFV_1_0) {
-			printf("Unhandled icresp PFV %d\n", icresp->pfv);
+			fprintf(stderr, "Unhandled icresp PFV %d\n",
+				icresp->pfv);
 			return -1;
 		}
-		printf("Valid icresp received, cpda %d\n", icresp->cpda);
 	}
 	return len;
 }
@@ -81,7 +81,6 @@ int kdreq(int sfd, const char **reg, int numreg)
 			reg_addr_size = ptr - reg_addr;
 			reg_port = ptr + 1;
 		}
-		printf("Registering %s port %s\n", reg_addr, reg_port);
 		krec = (struct nvme_tcp_kickstart_rec *)(buf + krec_offset);
 		memset(krec, 0, sizeof(*krec));
 		krec->trtype = NVMF_TRTYPE_TCP;
@@ -103,28 +102,31 @@ int kdreq(int sfd, const char **reg, int numreg)
 		return len;
 	}
 	if (!len) {
-		printf("Connection closed by peer\n");
+		fprintf(stderr, "Connection closed by peer\n");
 		return len;
 	}
 	kdresp = (struct nvme_tcp_kdresp_pdu *)buf;
 	if (kdresp->hdr.type != nvme_tcp_kdresp) {
-		printf("Invalid kdresp PDU type %d\n", kdresp->hdr.type);
+		fprintf(stderr, "Invalid kdresp PDU type %d\n",
+			kdresp->hdr.type);
 		return -1;
 	}
 	if (kdresp->hdr.hlen != 10) {
-		printf("Invalid kdresp PDU hdr len %d\n", kdresp->hdr.hlen);
+		fprintf(stderr, "Invalid kdresp PDU hdr len %d\n",
+			kdresp->hdr.hlen);
 		return -1;
 	}
 	if (le32toh(kdresp->hdr.plen) != 274) {
-		printf("Invalid kdresp PDU len %d\n",
+		fprintf(stderr, "Invalid kdresp PDU len %d\n",
 		       le32toh(kdresp->hdr.plen));
 		return -1;
 	}
 	if (kdresp->ksstat != 0) {
-		printf("Kickstart failed, reason %d\n", kdresp->failrsn);
+		fprintf(stderr, "Kickstart failed, reason %d\n",
+			kdresp->failrsn);
 		return 0;
 	}
-	printf("CDC NQN: %s\n", buf + 10);
+	printf("%s\n", buf + 10);
 	return 0;
 }
 
@@ -179,7 +181,7 @@ int main(int argc, char **argv)
 	hints.ai_flags = AI_PASSIVE;
 	err = getaddrinfo(cdc_addr, cdc_port, &hints, &result);
 	if (err) {
-		printf("getaddrinfo: %s\n", gai_strerror(err));
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(err));
 		return 1;
 	}
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
@@ -196,10 +198,9 @@ int main(int argc, char **argv)
 		sfd = -1;
 	}
 	if (sfd == -1) {
-		printf("Failed to connect\n");
+		fprintf(stderr, "Failed to connect\n");
 		return 1;
 	}
-	printf("connected\n");
 	err = icreq(sfd);
 	if (err > 0)
 		err = kdreq(sfd, reg, numreg);
