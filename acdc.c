@@ -32,7 +32,6 @@ int icreq(int sfd)
 	if (len > 0) {
 		struct nvme_tcp_icresp_pdu *icresp;
 
-		printf("Read %ld icresp bytes\n", len);
 		icresp = (struct nvme_tcp_icresp_pdu *)buf;
 		if (icresp->hdr.type != nvme_tcp_icresp) {
 			printf("Not an icresp PDU\n");
@@ -96,9 +95,14 @@ int kdreq(int sfd, const char **reg, int numreg)
 		perror("send kdreq");
 		return len;
 	}
+	memset(buf, 0, sizeof(buf));
 	len = read(sfd, buf, sizeof(buf));
 	if (len < 0) {
 		perror("read kdresp");
+		return len;
+	}
+	if (!len) {
+		printf("Connection closed by peer\n");
 		return len;
 	}
 	kdresp = (struct nvme_tcp_kdresp_pdu *)buf;
@@ -125,11 +129,11 @@ int kdreq(int sfd, const char **reg, int numreg)
 
 int main(int argc, char **argv)
 {
-	char *cdc_addr, *cdc_port = "8009", *ptr;
+	char *cdc_addr = NULL, *cdc_port = "8009", *ptr;
 	const char **reg = NULL;
 	struct addrinfo hints, *result, *rp;
 	int opt, err, sfd = -1;
-	int numreg;
+	int numreg = 0;
 
 	while ((opt = getopt(argc, argv, "c:r:h")) != -1) {
 		switch (opt) {
@@ -154,9 +158,19 @@ int main(int argc, char **argv)
 			}
 			numreg++;
 			break;
+		case 'h':
+			printf("Usage: %s -c <address[:port]> -r <address[:port]>\n", argv[0]);
+			return 0;
+			break;
 		default:
+			fprintf(stderr, "%s: Invalid argument -%c\n",
+				argv[0], opt);
 			return 1;
 		}
+	}
+	if (!cdc_addr) {
+		fprintf(stderr, "%s: no CDC address specified\n", argv[0]);
+		return 1;
 	}
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
