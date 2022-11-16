@@ -44,9 +44,65 @@ int icreq(int sfd)
 			printf("Unhandled icresp PFV %d\n", icresp->pfv);
 			return -1;
 		}
-		printf("Valid icresp received\n");
+		printf("Valid icresp received, cpda %d\n", icresp->cpda);
 	}
 	return len;
+}
+
+int kdreq(int sfd, int adrfam, const char *addr, const char *port)
+{
+	char buf[1024];
+	struct nvme_tcp_kdreq_pdu *kdreq;
+	struct nvme_tcp_kickstart_rec *krec;
+	struct nvme_tcp_kdresp_pdu *kdresp;
+	unsigned int krec_offset, kdreq_len = 12 + 290;
+	ssize_t len;
+
+	krec_offset = sizeof(*kdreq);
+	memset(buf, 0, sizeof(buf));
+	kdreq = (struct nvme_tcp_kdreq_pdu *)buf;
+	kdreq->hdr.type = nvme_tcp_kdreq;
+	kdreq->hdr.hlen = 12;
+	kdreq->hdr.pdo = krec_offset;
+	kdreq->hdr.plen = htole16(kdreq_len);
+	kdreq->numkr = htole16(1);
+	kdreq->numdie = htole16(1);
+	krec = (struct nvme_tcp_kickstart_rec *)(buf + krec_offset);
+	krec->trtype = NVMF_TRTYPE_TCP;
+	krec->adrfam = adrfam;
+	memcpy(krec->trsvcid, port, NVMF_TRSVCID_SIZE);
+	memcpy(krec->traddr, addr, NVMF_TRADDR_SIZE);
+
+	len = write(sfd, kdreq, kdreq_len);
+	if (len < kdreq_len) {
+		perror("send kdreq");
+		return len;
+	}
+	len = read(sfd, buf, sizeof(buf));
+	if (len < 0) {
+		perror("read kdresp");
+		return len;
+	}
+	kdresp = (struct nvme_tcp_kdresp_pdu *)buf;
+	if (kdresp->hdr.type != nvme_tcp_kdresp) {
+		printf("Invalid kdresp PDU type %d\n", kdresp->hdr.type);
+		return -1;
+	}
+	if (kdresp->hdr.hlen != 10) {
+		printf("Invalid kdresp PDU hdr len %d\n", kdresp->hdr.hlen);
+		return -1;
+	}
+	if (le32toh(kdresp->hdr.plen) != 274) {
+		printf("Invalid kdresp PDU len %d\n",
+		       le32toh(kdresp->hdr.plen));
+		return -1;
+	}
+	if (kdresp->ksstat != 0) {
+		printf("Kickstart failed, reason %d\n", kdresp->failrsn);
+		return 0;
+	}
+	printf("CDC NQN: %s\n", buf + 10);
+	return 0;
 }
 
 int main(int argc, char **argv)
@@ -55,6 +111,7 @@ int main(int argc, char **argv)
 	const char *port;
 	struct addrinfo hints, *result, *rp;
 	int opt, err, sfd = -1;
+	int adrfam;
 
 	while ((opt = getopt(argc, argv, "a:p:h")) != -1) {
 		switch (opt) {
@@ -85,8 +142,13 @@ int main(int argc, char **argv)
 			       rp->ai_family, rp->ai_socktype, rp->ai_protocol);
 			continue;
 		}
-		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
+		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1) {
+			if (rp->ai_family == AF_INET)
+				adrfam = NVMF_ADDR_FAMILY_IP4;
+			else
+				adrfam = NVMF_ADDR_FAMILY_IP6;
 			break;
+		}
 		close(sfd);
 		sfd = -1;
 	}
@@ -95,7 +157,9 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	printf("connected\n");
-	icreq(sfd);
+	err = icreq(sfd);
+	if (err > 0)
+		err = kdreq(sfd, adrfam, addr, port);
 	close(sfd);
 
 	return 0;
