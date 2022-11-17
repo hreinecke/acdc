@@ -1,3 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * acdc - Asynchronous (de-)centralized discovery controller
+ *
+ * Copyright (c) 2022 Hannes Reinecke, SUSE Labs. All rights reserved.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
