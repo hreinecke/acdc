@@ -4,10 +4,13 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
 #include <netdb.h>
 #include <linux/types.h>
+#include <dirent.h>
 
 #include "nvme-tcp.h"
 
@@ -50,14 +53,14 @@ int icreq(int sfd)
 	return len;
 }
 
-int kdreq(int sfd, const char **reg, int numreg)
+int kdreq(int sfd, char **reg, int numreg)
 {
 	char buf[1024], *ptr;
 	struct nvme_tcp_kdreq_pdu *kdreq;
 	struct nvme_tcp_kickstart_rec *krec;
 	struct nvme_tcp_kdresp_pdu *kdresp;
 	unsigned int krec_offset, kdreq_len = sizeof(*kdreq);
-	int i;
+	int i, nr = 0;
 	ssize_t len;
 
 	krec_offset = kdreq_len;
@@ -69,27 +72,57 @@ int kdreq(int sfd, const char **reg, int numreg)
 	kdreq->hdr.pdo = krec_offset;
 	kdreq_len += sizeof(*krec) * numreg;
 	kdreq->hdr.plen = htole16(kdreq_len);
-	kdreq->numkr = htole16(numreg);
 	kdreq->numdie = htole16(1);
 	for (i = 0; i < numreg; i++) {
 		const char *reg_addr = reg[i];
 		const char *reg_port = "8009";
 		size_t reg_addr_size = strlen(reg_addr);
 
-		ptr = strrchr(reg_addr, ':');
-		if (ptr) {
-			reg_addr_size = ptr - reg_addr;
-			reg_port = ptr + 1;
-		}
 		krec = (struct nvme_tcp_kickstart_rec *)(buf + krec_offset);
 		memset(krec, 0, sizeof(*krec));
-		krec->trtype = NVMF_TRTYPE_TCP;
-		krec->adrfam = reg_addr[0] == '[' ?
-			NVMF_ADDR_FAMILY_IP6 : NVMF_ADDR_FAMILY_IP4;
+		ptr = reg[i];
+		if (!strncmp(ptr, "tcp,", 4)) {
+			krec->trtype = NVMF_TRTYPE_TCP;
+			ptr += 4;
+		} else if (!strncmp(ptr, "fc,", 3)) {
+			krec->trtype = NVMF_TRTYPE_FC;
+			ptr += 3;
+		} else if (!strncmp(ptr, "rdma,", 5)) {
+			krec->trtype = NVMF_TRTYPE_RDMA;
+			ptr += 5;
+		} else {
+			fprintf(stderr, "Unhandled record %s\n", ptr);
+			continue;
+		}
+		reg_addr = ptr;
+		ptr = strchr(reg_addr, ',');
+		if (!ptr) {
+			if (strchr(reg_addr,':'))
+				krec->adrfam = NVMF_ADDR_FAMILY_IP6;
+			else
+				krec->adrfam = NVMF_ADDR_FAMILY_IP4;
+		} else if (!strncmp(ptr, ",ipv4,", 5)) {
+			krec->adrfam = NVMF_ADDR_FAMILY_IP4;
+			ptr += 5;
+		} else if (!strncmp(ptr, ",ipv6,", 5)) {
+			krec->adrfam = NVMF_ADDR_FAMILY_IP6;
+			ptr += 5;
+		} else if (!strncmp(ptr, ",fc,", 4)) {
+			krec->adrfam = NVMF_ADDR_FAMILY_FC;
+			ptr += 4;
+		} else if (!strncmp(ptr, ",ib,", 4)) {
+			krec->adrfam = NVMF_ADDR_FAMILY_IB;
+			ptr += 4;
+		}
+		if (ptr && strlen(ptr))
+			reg_port = ptr;
+
 		memcpy(krec->trsvcid, reg_port, strlen(reg_port));
 		memcpy(krec->traddr, reg_addr, reg_addr_size);
 		krec_offset += sizeof(*krec);
+		nr++;
 	}
+	kdreq->numkr = htole16(nr);
 	len = write(sfd, kdreq, kdreq_len);
 	if (len < kdreq_len) {
 		perror("send kdreq");
@@ -161,10 +194,93 @@ int open_socket(char *cdc_addr, char *cdc_port)
 	return sfd;
 }
 
+char *nvmet_port_attr(const char *prefix, const char *port, const char *attr)
+{
+	char attrname[PATH_MAX];
+	char attrbuf[256], *value = NULL;
+	int fd, len;
+
+	sprintf(attrname, "%s/%s/%s", prefix, port, attr);
+	fd = open(attrname, O_RDONLY);
+	if (fd < 0)
+		return NULL;
+	memset(attrbuf, 0, 256);
+	len = read(fd, attrbuf, 256);
+	if (len > 0) {
+		value = strdup(attrbuf);
+		if (value[len - 1] == '\n')
+			value[len - 1] = '\0';
+	}
+	close(fd);
+	return value;
+}
+
+char **lookup_nvmet(int *numreg)
+{
+	char **reg = NULL;
+	int nr = 0;
+	DIR *nvmet_dir;
+	struct dirent *nvmet_dirent;
+	const char prefix[] = "/sys/kernel/config/nvmet/ports";
+
+	nvmet_dir = opendir(prefix);
+	if (!nvmet_dir) {
+		perror("opendir");
+		*numreg = nr;
+		return NULL;
+	}
+	while ((nvmet_dirent = readdir(nvmet_dir))) {
+		char rec[1024];
+		char *trtype, *adrfam, *traddr, *trsvcid;
+
+		if (!strcmp(nvmet_dirent->d_name, ".") ||
+		    !strcmp(nvmet_dirent->d_name, ".."))
+			continue;
+		trtype = nvmet_port_attr(prefix, nvmet_dirent->d_name,
+					 "addr_trtype");
+		if (!trtype) {
+			printf("Cannot read %s/%s/attr_trtype\n",
+			       prefix, nvmet_dirent->d_name);
+			continue;
+		}
+		if (!strlen(trtype) ||
+		    !strcmp(trtype, "loop") || !strcmp(trtype, "pci")) {
+			free(trtype);
+			continue;
+		}
+		adrfam = nvmet_port_attr(prefix, nvmet_dirent->d_name,
+				       "addr_adrfam");
+		traddr = nvmet_port_attr(prefix, nvmet_dirent->d_name,
+					 "addr_traddr");
+		trsvcid = nvmet_port_attr(prefix, nvmet_dirent->d_name,
+					  "addr_trsvcid");
+		sprintf(rec, "%s,%s,%s,%s",
+			trtype, traddr, adrfam, trsvcid);
+		reg = realloc(reg, sizeof(char *) * (nr + 1));
+		if (!reg) {
+			perror("realloc");
+			break;
+		}
+		reg[nr] = strdup(rec);
+		printf("Registering record %d: %s\n", nr, reg[nr]);
+		nr++;
+		if (trsvcid)
+			free(trsvcid);
+		if (traddr)
+			free(traddr);
+		if (adrfam)
+			free(adrfam);
+		free(trtype);
+	}
+	closedir(nvmet_dir);
+	*numreg = nr;
+	return reg;
+}
+
 int main(int argc, char **argv)
 {
 	char *cdc_addr = NULL, *cdc_port = "8009", *ptr;
-	const char **reg = NULL;
+	char **reg = NULL;
 	int opt, err, sfd = -1;
 	int numreg = 0;
 
@@ -205,6 +321,8 @@ int main(int argc, char **argv)
 		fprintf(stderr, "%s: no CDC address specified\n", argv[0]);
 		return 1;
 	}
+	if (!reg)
+		reg = lookup_nvmet(&numreg);
 	sfd = open_socket(cdc_addr, cdc_port);
 	if (sfd < 0) {
 		fprintf(stderr, "Failed to connect to %s\n", cdc_addr);
