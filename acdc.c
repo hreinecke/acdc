@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -53,7 +54,7 @@ int icreq(int sfd)
 	return len;
 }
 
-int kdreq(int sfd, char **reg, int numreg)
+char *kdreq(int sfd, char **reg, int numreg)
 {
 	char buf[1024], *ptr;
 	struct nvme_tcp_kdreq_pdu *kdreq;
@@ -131,41 +132,40 @@ int kdreq(int sfd, char **reg, int numreg)
 	len = write(sfd, kdreq, kdreq_len);
 	if (len < kdreq_len) {
 		perror("send kdreq");
-		return len;
+		return NULL;
 	}
 	memset(buf, 0, sizeof(buf));
 	len = read(sfd, buf, sizeof(buf));
 	if (len < 0) {
 		perror("read kdresp");
-		return len;
+		return NULL;
 	}
 	if (!len) {
 		fprintf(stderr, "Connection closed by peer\n");
-		return len;
+		return NULL;
 	}
 	kdresp = (struct nvme_tcp_kdresp_pdu *)buf;
 	if (kdresp->hdr.type != nvme_tcp_kdresp) {
 		fprintf(stderr, "Invalid kdresp PDU type %d\n",
 			kdresp->hdr.type);
-		return -1;
+		return NULL;
 	}
 	if (kdresp->hdr.hlen != 10) {
 		fprintf(stderr, "Invalid kdresp PDU hdr len %d\n",
 			kdresp->hdr.hlen);
-		return -1;
+		return NULL;
 	}
 	if (le32toh(kdresp->hdr.plen) != 274) {
 		fprintf(stderr, "Invalid kdresp PDU len %d\n",
 		       le32toh(kdresp->hdr.plen));
-		return -1;
+		return NULL;
 	}
 	if (kdresp->ksstat != 0) {
 		fprintf(stderr, "Kickstart failed, reason %d\n",
 			kdresp->failrsn);
-		return 0;
+		return NULL;
 	}
-	printf("%s\n", buf + 10);
-	return 0;
+	return strdup(buf + 10);
 }
 
 int open_socket(char *cdc_addr, char *cdc_port)
@@ -183,19 +183,31 @@ int open_socket(char *cdc_addr, char *cdc_port)
 		return -1;
 	}
 	for (rp = result; rp != NULL; rp = rp->ai_next) {
+		char *adrfam = "ipv4";
+
+		if (rp->ai_family != AF_INET)
+			adrfam = "ipv6";
 		sfd = socket(rp->ai_family, rp->ai_socktype,
 			     rp->ai_protocol);
 		if (sfd == -1) {
 			fprintf(stderr, "failed to create %s socket\n",
-				rp->ai_family == AF_INET ? "IPv4" : "IPv6");
+				adrfam);
 			continue;
 		}
-		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
+		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1) {
+			char hbuf[NI_MAXHOST];
+
+			err = getnameinfo(rp->ai_addr, rp->ai_addrlen,
+					  hbuf, sizeof(hbuf), NULL, 0,
+					  NI_NUMERICHOST);
+			if (!err)
+				printf("Connected to tcp:%s:%s:%s\n",
+				       hbuf, adrfam, cdc_port);
 			break;
+		}
 		close(sfd);
 		sfd = -1;
 	}
-
 	return sfd;
 }
 
@@ -282,12 +294,67 @@ char **lookup_nvmet(int *numreg)
 	return reg;
 }
 
+int nvmet_set_port_attr(const char *prefix, const char *attr, const char *value)
+{
+	char attrname[PATH_MAX];
+	int fd, len;
+
+	sprintf(attrname, "%s/%s", prefix, attr);
+	fd = open(attrname, O_RDWR);
+	if (fd < 0)
+		return -1;
+	len = write(fd, value, strlen(value));
+	if (len < strlen(value)) {
+		if (len > 0) {
+			errno = EBUSY;
+			len = -1;
+		}
+		perror("write");
+	}
+	close(fd);
+	return len;
+}
+
+int register_parent(char **reg, int numreg,
+		    char *cdc_addr, char *cdc_port, char *cdc_nqn)
+{
+	const char prefix[] = "/sys/kernel/config/nvmet/ports";
+	char refname[PATH_MAX];
+	int i, err;
+
+	for (i = 0; i < numreg; i++) {
+		char *rec = reg[i];
+		char *port;
+
+		port = strsep(&rec, ",");
+		sprintf(refname, "%s/%s/referrals/parent",
+			prefix, port);
+		err = mkdir(refname, S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
+		if (err && errno != -EEXIST) {
+			perror("mkdir");
+			continue;
+		}
+
+		nvmet_set_port_attr(refname, "addr_traddr",
+				    cdc_addr);
+		nvmet_set_port_attr(refname, "addr_trsvcid",
+				    cdc_port);
+		nvmet_set_port_attr(refname, "addr_trtype", "tcp");
+		if (strchr(cdc_addr, ':'))
+			nvmet_set_port_attr(refname, "addr_adrfam", "ipv6");
+		else
+			nvmet_set_port_attr(refname, "addr_adrfam", "ipv4");
+		nvmet_set_port_attr(refname, "addr_subtype", "parent");
+	}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
-	char *cdc_addr = NULL, *cdc_port = "8009", *ptr;
+	char *cdc_addr = NULL, *cdc_port = "8009", *ptr, *nqn = NULL;
 	char **reg = NULL;
 	int opt, err, sfd = -1;
-	int numreg = 0;
+	int numreg = 0, use_nvmet = 0;
 
 	while ((opt = getopt(argc, argv, "c:r:h")) != -1) {
 		switch (opt) {
@@ -327,8 +394,14 @@ int main(int argc, char **argv)
 		fprintf(stderr, "%s: no CDC address specified\n", argv[0]);
 		return 1;
 	}
-	if (!reg)
+	if (!reg) {
 		reg = lookup_nvmet(&numreg);
+		use_nvmet = 1;
+	}
+	if (!numreg) {
+		fprintf(stderr, "No ports to register\n");
+		return 1;
+	}
 	sfd = open_socket(cdc_addr, cdc_port);
 	if (sfd < 0) {
 		fprintf(stderr, "Failed to connect to %s\n", cdc_addr);
@@ -336,7 +409,13 @@ int main(int argc, char **argv)
 	}
 	err = icreq(sfd);
 	if (err > 0)
-		err = kdreq(sfd, reg, numreg);
+		nqn = kdreq(sfd, reg, numreg);
+	if (nqn) {
+		if (use_nvmet)
+			register_parent(reg, numreg, cdc_addr, cdc_port, nqn);
+		else
+			printf("Registered with CDC %s\n", nqn);
+	}
 	close(sfd);
 
 	return 0;
