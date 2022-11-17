@@ -130,11 +130,41 @@ int kdreq(int sfd, const char **reg, int numreg)
 	return 0;
 }
 
+int open_socket(char *cdc_addr, char *cdc_port)
+{
+	struct addrinfo hints, *result, *rp;
+	int err, sfd = -1;
+
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE;
+	err = getaddrinfo(cdc_addr, cdc_port, &hints, &result);
+	if (err) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(err));
+		return -1;
+	}
+	for (rp = result; rp != NULL; rp = rp->ai_next) {
+		sfd = socket(rp->ai_family, rp->ai_socktype,
+			     rp->ai_protocol);
+		if (sfd == -1) {
+			fprintf(stderr, "failed to create %s socket\n",
+				rp->ai_family == AF_INET ? "IPv4" : "IPv6");
+			continue;
+		}
+		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
+			break;
+		close(sfd);
+		sfd = -1;
+	}
+
+	return sfd;
+}
+
 int main(int argc, char **argv)
 {
 	char *cdc_addr = NULL, *cdc_port = "8009", *ptr;
 	const char **reg = NULL;
-	struct addrinfo hints, *result, *rp;
 	int opt, err, sfd = -1;
 	int numreg = 0;
 
@@ -175,30 +205,9 @@ int main(int argc, char **argv)
 		fprintf(stderr, "%s: no CDC address specified\n", argv[0]);
 		return 1;
 	}
-	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_PASSIVE;
-	err = getaddrinfo(cdc_addr, cdc_port, &hints, &result);
-	if (err) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(err));
-		return 1;
-	}
-	for (rp = result; rp != NULL; rp = rp->ai_next) {
-		sfd = socket(rp->ai_family, rp->ai_socktype,
-			     rp->ai_protocol);
-		if (sfd == -1) {
-			printf("failed to create socket %d/%d/%d\n",
-			       rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-			continue;
-		}
-		if (connect(sfd, rp->ai_addr, rp->ai_addrlen) != -1)
-			break;
-		close(sfd);
-		sfd = -1;
-	}
-	if (sfd == -1) {
-		fprintf(stderr, "Failed to connect\n");
+	sfd = open_socket(cdc_addr, cdc_port);
+	if (sfd < 0) {
+		fprintf(stderr, "Failed to connect to %s\n", cdc_addr);
 		return 1;
 	}
 	err = icreq(sfd);
