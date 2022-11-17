@@ -74,51 +74,56 @@ int kdreq(int sfd, char **reg, int numreg)
 	kdreq->hdr.plen = htole16(kdreq_len);
 	kdreq->numdie = htole16(1);
 	for (i = 0; i < numreg; i++) {
-		const char *reg_addr = reg[i];
+		char *rec = reg[i], *reg_addr, *index;
 		const char *reg_port = "8009";
-		size_t reg_addr_size = strlen(reg_addr);
 
 		krec = (struct nvme_tcp_kickstart_rec *)(buf + krec_offset);
 		memset(krec, 0, sizeof(*krec));
-		ptr = reg[i];
-		if (!strncmp(ptr, "tcp,", 4)) {
+		index = strsep(&rec, ",");
+		if (!index)
+			index = "<>";
+		ptr = strsep(&rec, ",");
+		if (!strncmp(ptr, "tcp", 3)) {
 			krec->trtype = NVMF_TRTYPE_TCP;
-			ptr += 4;
-		} else if (!strncmp(ptr, "fc,", 3)) {
+		} else if (!strncmp(ptr, "fc", 2)) {
 			krec->trtype = NVMF_TRTYPE_FC;
-			ptr += 3;
-		} else if (!strncmp(ptr, "rdma,", 5)) {
+		} else if (!strncmp(ptr, "rdma", 4)) {
 			krec->trtype = NVMF_TRTYPE_RDMA;
-			ptr += 5;
 		} else {
-			fprintf(stderr, "Unhandled record %s\n", ptr);
+			fprintf(stderr,
+				"rec %d (port %s): unhandled trtype %s\n",
+				i, index, ptr);
 			continue;
 		}
-		reg_addr = ptr;
-		ptr = strchr(reg_addr, ',');
-		if (!ptr) {
+		if (!rec) {
+			fprintf(stderr,
+				"rec %d (port %s): no traddr specified\n",
+				i, index);
+			continue;
+		}
+		reg_addr = strsep(&rec, ",");
+		if (!rec) {
 			if (strchr(reg_addr,':'))
 				krec->adrfam = NVMF_ADDR_FAMILY_IP6;
 			else
 				krec->adrfam = NVMF_ADDR_FAMILY_IP4;
-		} else if (!strncmp(ptr, ",ipv4,", 5)) {
-			krec->adrfam = NVMF_ADDR_FAMILY_IP4;
-			ptr += 5;
-		} else if (!strncmp(ptr, ",ipv6,", 5)) {
-			krec->adrfam = NVMF_ADDR_FAMILY_IP6;
-			ptr += 5;
-		} else if (!strncmp(ptr, ",fc,", 4)) {
-			krec->adrfam = NVMF_ADDR_FAMILY_FC;
-			ptr += 4;
-		} else if (!strncmp(ptr, ",ib,", 4)) {
-			krec->adrfam = NVMF_ADDR_FAMILY_IB;
-			ptr += 4;
+		} else {
+			ptr = strsep(&rec, ",");
+			if (!strncmp(ptr, ",ipv4,", 5))
+				krec->adrfam = NVMF_ADDR_FAMILY_IP4;
+			else if (!strncmp(ptr, ",ipv6,", 5))
+				krec->adrfam = NVMF_ADDR_FAMILY_IP6;
+			else if (!strncmp(ptr, ",fc,", 4))
+				krec->adrfam = NVMF_ADDR_FAMILY_FC;
+			else if (!strncmp(ptr, ",ib,", 4))
+				krec->adrfam = NVMF_ADDR_FAMILY_IB;
+			ptr = rec;
 		}
 		if (ptr && strlen(ptr))
 			reg_port = ptr;
 
 		memcpy(krec->trsvcid, reg_port, strlen(reg_port));
-		memcpy(krec->traddr, reg_addr, reg_addr_size);
+		memcpy(krec->traddr, reg_addr, strlen(reg_addr));
 		krec_offset += sizeof(*krec);
 		nr++;
 	}
@@ -254,7 +259,7 @@ char **lookup_nvmet(int *numreg)
 					 "addr_traddr");
 		trsvcid = nvmet_port_attr(prefix, nvmet_dirent->d_name,
 					  "addr_trsvcid");
-		sprintf(rec, "%s,%s,%s,%s",
+		sprintf(rec, "%s,%s,%s,%s,%s", nvmet_dirent->d_name,
 			trtype, traddr, adrfam, trsvcid);
 		reg = realloc(reg, sizeof(char *) * (nr + 1));
 		if (!reg) {
@@ -300,11 +305,12 @@ int main(int argc, char **argv)
 				perror("realloc");
 				return 1;
 			}
-			reg[numreg] = strdup(optarg);
+			reg[numreg] = malloc(strlen(optarg) + 10);
 			if (!reg[numreg]) {
-				perror("strdup");
+				perror("malloc");
 				return 1;
 			}
+			sprintf(reg[numreg], ",%s", optarg);
 			numreg++;
 			break;
 		case 'h':
