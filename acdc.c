@@ -86,10 +86,13 @@ char *kdreq(int sfd, char **reg, int numreg)
 		ptr = strsep(&rec, ",");
 		if (!strncmp(ptr, "tcp", 3)) {
 			krec->trtype = NVMF_TRTYPE_TCP;
+			krec->adrfam = NVMF_ADDR_FAMILY_IP4;
 		} else if (!strncmp(ptr, "fc", 2)) {
 			krec->trtype = NVMF_TRTYPE_FC;
+			krec->adrfam = NVMF_ADDR_FAMILY_FC;
 		} else if (!strncmp(ptr, "rdma", 4)) {
 			krec->trtype = NVMF_TRTYPE_RDMA;
+			krec->adrfam = NVMF_ADDR_FAMILY_IP4;
 		} else {
 			fprintf(stderr,
 				"rec %d (port %s): unhandled trtype %s\n",
@@ -110,13 +113,13 @@ char *kdreq(int sfd, char **reg, int numreg)
 				krec->adrfam = NVMF_ADDR_FAMILY_IP4;
 		} else {
 			ptr = strsep(&rec, ",");
-			if (!strncmp(ptr, ",ipv4,", 5))
+			if (!strncmp(ptr, "ipv4", 4))
 				krec->adrfam = NVMF_ADDR_FAMILY_IP4;
-			else if (!strncmp(ptr, ",ipv6,", 5))
+			else if (!strncmp(ptr, "ipv6", 4))
 				krec->adrfam = NVMF_ADDR_FAMILY_IP6;
-			else if (!strncmp(ptr, ",fc,", 4))
+			else if (!strncmp(ptr, "fc", 2))
 				krec->adrfam = NVMF_ADDR_FAMILY_FC;
-			else if (!strncmp(ptr, ",ib,", 4))
+			else if (!strncmp(ptr, "ib", 2))
 				krec->adrfam = NVMF_ADDR_FAMILY_IB;
 			ptr = rec;
 		}
